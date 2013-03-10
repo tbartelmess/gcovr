@@ -249,28 +249,50 @@ def process_gcov_data(file, covdata, options):
             pass # keep previous line number!
             
         if tmp[0] == '#':
-            uncovered.add( lineno )
+            if skippingFunction:
+                noncode.add( lineno )
+            else:
+                code = segments[2].strip()
+                if code.endswith('// Skip coverage.') or code.endswith('// Skip coverage'):
+                    noncode.add( lineno )
+                else:
+                    uncovered.add( lineno )
+                skippingAssertion = False
         elif tmp[0] in "0123456789":
-            covered[lineno] = int(segments[0].strip())
+            if skippingFunction:
+                noncode.add( lineno )
+            else:
+                covered[lineno] = int(segments[0].strip())
+                skippingAssertion = False
+                code = segments[2].strip()
+                if code.startswith('NSAssert') or code.startswith('NSParameterAssert'):
+                    skippingAssertion = True
         elif tmp[0] == '-':
+            skippingAssertion = False
             # remember certain non-executed lines
             code = segments[2].strip()
-            if len(code) == 0 or code == "{" or code == "}" or \
-               code.startswith("//") or code == 'else':
+            if len(code) == 0 or code == "{" or code == "}" or code.startswith("//"):
                 noncode.add( lineno )
         elif tmp.startswith('branch'):
-            fields = line.split()
-            try:
-                count = int(fields[3])
-                branches.setdefault(lineno, {})[int(fields[1])] = count
-            except:
-                # We ignore branches that were "never executed"
-                pass
+            if not skippingAssertion and not skippingFunction:
+                fields = line.split()
+                try:
+                    count = int(fields[3])
+                    branches.setdefault(lineno, {})[int(fields[1])] = count
+                except:
+                    # We ignore branches that were "never executed"
+                    pass
         elif tmp.startswith('call'):
+            skippingAssertion = False
             pass
         elif tmp.startswith('function'):
+            skippingAssertion = False
+            prevSegments = prevLine.split(":")
+            prevCode = len(prevSegments) > 2 and prevSegments[2].strip() or ''
+            skippingFunction = prevCode.startswith("// Coverage can't be checked")
             pass
         elif tmp[0] == 'f':
+            skippingAssertion = False
             pass
             #if first_record:
                 #first_record=False
@@ -282,7 +304,10 @@ def process_gcov_data(file, covdata, options):
             #prev = int(segments[1].strip())
             #first_record=True
         else:
+            skippingAssertion = False
             print "UNKNOWN LINE DATA:",tmp
+        prevLine = line
+    
     #
     # If the file is already in covdata, then we
     # remove lines that are covered here.  Otherwise,
